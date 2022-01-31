@@ -9,6 +9,9 @@ import (
 	_ "log"
 	"net/http"
 	"os"
+	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -52,13 +55,14 @@ func VerifId(tag *id3v2.Tag) bool { //verif des ID non nul
 }
 
 //LECTURE DES ID3TAGS
-func LectureId(Nomfichier string) {
+func LectureId(Nomfichier string) bool {
 	fichier, err := id3v2.Open(Nomfichier, id3v2.Options{Parse: true})
 	VerifErr(err)
 	defer fichier.Close()
 
 	if VerifId(fichier) == false {
 		fmt.Println("ERREUR : Les id3tags ne sont pas present")
+		return false
 	} else {
 
 		//Affichage des id3tags : https://pkg.go.dev/github.com/bogem/id3v2/v2 voir les diff fct avec id3v2
@@ -67,6 +71,7 @@ func LectureId(Nomfichier string) {
 		fmt.Println("ARTISTE :", fichier.Artist())
 		fmt.Println("ANNEE DE PARUTION :", fichier.Year())
 		fmt.Println("GENRE :", fichier.Genre())
+		return true
 	}
 
 }
@@ -108,22 +113,103 @@ func TelechargerAudio(nv string, url string) error {
 	_, err = io.Copy(out, resp.Body)
 	return err
 }
+func calcLoundness(fichier string) float64 {
+	cmd := exec.Command("ffmpeg", "-i", fichier, "-af", "ebur128=framelog=verbose", "-f", "null", "-")
 
-func main() {
-	fichier := os.Args[1] //Nom du fichier à ouvrir go run
-	tab := LectureFichier(fichier)
-	for i := 0; i < len(tab); i++ {
-		err := TelechargerAudio("audio.mp3", tab[i])
+	b, err := cmd.CombinedOutput()
+	VerifErr(err)
+	/*temp := strings.Split(string(b), "] Summary:")
+	LU := strings.Split(temp[1], "         ")
+	LUFS := strings.Split(LU[1], " ")
+	fmt.Printf("DONNEES AUDIO :")
+	fmt.Print(LUFS[0])
+	fmt.Println(" LUFS")*/
+	re := regexp.MustCompile(`I:\s+(.+)\sLUFS`)
+	matches := re.FindAllSubmatch(b, -1)
+
+	value, _ := strconv.ParseFloat(string(matches[0][1]), 64)
+	return value
+}
+
+func SaveMedia(nv string) {
+	file, err := os.OpenFile("Falsemedias.txt", os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		panic(err)
+	}
+	_, err = file.WriteString(nv + "\n") // écrire dans le fichier
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close() // on ferme automatiquement à la fin de notre programme
+
+}
+func SaveStat(nv map[int]int, taille int) {
+	var percent int
+	file, err := os.OpenFile("statmedias.txt", os.O_WRONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+	_, err = file.WriteString("Statistique des medias audio : " + "\n") // écrire dans le fichier
+	if err != nil {
+		panic(err)
+	}
+	for nb := range nv {
+		percent = 100 * nv[nb] / taille
+		test := strconv.Itoa(nv[nb]) + " medias de " + strconv.Itoa(nb) + " LUFS" + " : " + strconv.Itoa(percent) + " %"
+		_, err = file.WriteString(test + "\n") // écrire dans le fichier
 		if err != nil {
 			panic(err)
 		}
-		if VerifMedia("audio.mp3") == false {
-			fmt.Println("Mauvais fichier")
-		} else {
-			fmt.Print("Fichier Audio N°")
-			fmt.Println(i + 1)
-			ExistMedia("audio.mp3")
-			LectureId("audio.mp3")
+	}
+
+	defer file.Close() // on ferme automatiquement à la fin de notre programme
+}
+
+func main() {
+	fichier := os.Args[1] //Nom du fichier à ouvrir go run
+	stat := make(map[int]int)
+	if VerifMedia(fichier) == false {
+		tab := LectureFichier(fichier)
+		for i := 0; i < len(tab); i++ {
+			err := TelechargerAudio("audio.mp3", tab[i])
+			if err != nil {
+				panic(err)
+			}
+			if VerifMedia("audio.mp3") == false {
+				fmt.Println("Mauvais fichier")
+				SaveMedia(tab[i])
+			} else {
+				fmt.Print("Fichier Audio N°")
+				fmt.Println(i + 1)
+				ExistMedia("audio.mp3")
+				if LectureId("audio.mp3") == false {
+					SaveMedia(tab[i])
+				}
+			}
+			LUFS := calcLoundness("audio.mp3")
+			fmt.Println("LUFS :", LUFS)
+			if LUFS >= -16 && LUFS <= -13 {
+				fmt.Println("NIVEAU AUDIO STABLE")
+			} else {
+				fmt.Println("NIVEAU AUDIO INSTABLE")
+				SaveMedia(tab[i])
+			}
+			stat[int(LUFS)] = stat[int(LUFS)] + 1
 		}
+		SaveStat(stat, len(tab))
+
+	} else {
+		ExistMedia(fichier)
+		LectureId(fichier)
+
+		LUFS := calcLoundness(fichier)
+		fmt.Println("LUFS :", LUFS)
+		if LUFS >= -16 && LUFS <= -13 {
+			fmt.Println("NIVEAU AUDIO STABLE")
+		} else {
+			fmt.Println("NIVEAU AUDIO INSTABLE")
+			SaveMedia(fichier)
+		}
+
 	}
 }
