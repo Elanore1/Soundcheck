@@ -1,0 +1,3 @@
+Statistique des medias audio : 
+6 medias de -15 LUFS : 85 %
+1 medias de -16 LUFS : 14 %
