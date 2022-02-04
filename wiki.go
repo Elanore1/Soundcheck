@@ -55,7 +55,7 @@ func VerifId(tag *id3v2.Tag) bool { //verif des ID non nul
 }
 
 //LECTURE DES ID3TAGS
-func LectureId(Nomfichier string) bool {
+func LectureId(Nomfichier string) bool { //lecture des ID
 	fichier, err := id3v2.Open(Nomfichier, id3v2.Options{Parse: true})
 	VerifErr(err)
 	defer fichier.Close()
@@ -76,14 +76,14 @@ func LectureId(Nomfichier string) bool {
 
 }
 
-func ExistMedia(Nomfichier string) {
+func ExistMedia(Nomfichier string) { //verification que le media est lisible et existe
 	if _, err := os.Stat(Nomfichier); os.IsNotExist(err) {
 		// Le fichier n'existe pas
 		fmt.Println("Le fichier n'est pas lisible")
 	}
 }
 
-func LectureFichier(fichier string) []string {
+func LectureFichier(fichier string) []string { //lire le fichier txt
 	file, err := os.Open(fichier) //ouverture fichier
 	VerifErr(err)
 	var tab []string //creation tableau dynamique pour stocker les url des fichier a teleharger
@@ -100,7 +100,7 @@ func LectureFichier(fichier string) []string {
 	return tab //on retourne le tableau
 }
 
-func TelechargerAudio(nv string, url string) error {
+func TelechargerAudio(nv string, url string) error { //telecharge l'audio grace au lien recu
 	resp, err := http.Get(url)
 	VerifErr(err)
 	defer resp.Body.Close()
@@ -113,7 +113,7 @@ func TelechargerAudio(nv string, url string) error {
 	_, err = io.Copy(out, resp.Body)
 	return err
 }
-func calcLoundness(fichier string) float64 {
+func calcLoundness(fichier string) float64 { //return le LUFS d'un media audio
 	cmd := exec.Command("ffmpeg", "-i", fichier, "-af", "ebur128=framelog=verbose", "-f", "null", "-")
 
 	b, err := cmd.CombinedOutput()
@@ -131,8 +131,8 @@ func calcLoundness(fichier string) float64 {
 	return value
 }
 
-func SaveMedia(nv string) {
-	file, err := os.OpenFile("Falsemedias.txt", os.O_WRONLY|os.O_APPEND, 0600)
+func SaveMedia(nv string) { //Sauvegarde du lien des fichiers corrompus
+	file, err := os.OpenFile("Falsemedias.txt", os.O_WRONLY, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -143,13 +143,18 @@ func SaveMedia(nv string) {
 	defer file.Close() // on ferme automatiquement à la fin de notre programme
 
 }
-func SaveStat(nv map[int]int, taille int) {
+func SaveStat(nv map[int]int, taille int, nbr int) { //stat des LUFS des fichiers et de la corruption des medias
 	var percent int
 	file, err := os.OpenFile("statmedias.txt", os.O_WRONLY, 0600)
 	if err != nil {
 		panic(err)
 	}
 	_, err = file.WriteString("Statistique des medias audio : " + "\n") // écrire dans le fichier
+	if err != nil {
+		panic(err)
+	}
+	percent = 100 * nbr / taille
+	_, err = file.WriteString("Taux de medias corrompus : " + strconv.Itoa(percent) + "% " + "\n") // écrire dans le fichier
 	if err != nil {
 		panic(err)
 	}
@@ -166,11 +171,13 @@ func SaveStat(nv map[int]int, taille int) {
 }
 
 func main() {
+	var cpt int
 	fichier := os.Args[1] //Nom du fichier à ouvrir go run
 	stat := make(map[int]int)
 	if VerifMedia(fichier) == false {
 		tab := LectureFichier(fichier)
 		for i := 0; i < len(tab); i++ {
+			fmt.Println("\n")
 			err := TelechargerAudio("audio.mp3", tab[i])
 			if err != nil {
 				panic(err)
@@ -178,27 +185,32 @@ func main() {
 			if VerifMedia("audio.mp3") == false {
 				fmt.Println("Mauvais fichier")
 				SaveMedia(tab[i])
+				cpt++
 			} else {
 				fmt.Print("Fichier Audio N°")
 				fmt.Println(i + 1)
 				ExistMedia("audio.mp3")
 				if LectureId("audio.mp3") == false {
 					SaveMedia(tab[i])
+					cpt++
 				}
 			}
 			LUFS := calcLoundness("audio.mp3")
 			fmt.Println("LUFS :", LUFS)
-			if LUFS >= -16 && LUFS <= -13 {
+			if LUFS >= -18 && LUFS <= -13 { //verif du niveau audio aproximatif
 				fmt.Println("NIVEAU AUDIO STABLE")
 			} else {
 				fmt.Println("NIVEAU AUDIO INSTABLE")
-				SaveMedia(tab[i])
+				if LectureId("audio.mp3") == true && VerifMedia("audio.mp3") == true { //cas le fichier n'a pas deja ete enregistré comme mauvais
+					cpt++
+					SaveMedia(tab[i])
+				}
 			}
 			stat[int(LUFS)] = stat[int(LUFS)] + 1
 		}
-		SaveStat(stat, len(tab))
+		SaveStat(stat, len(tab), cpt) //calcul des statistiques des medias du fichier txt
 
-	} else {
+	} else { //Cas on a seulement un fichier a regarder
 		ExistMedia(fichier)
 		LectureId(fichier)
 
